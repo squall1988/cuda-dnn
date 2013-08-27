@@ -18,6 +18,8 @@ using namespace std;
  * directly use the class to control the whole neural network
  */
 #define IDX(x, y, row) ((y)*(row)+(x))
+#define FREE_CUDA(a) {free_device_memory(a); free(a->data_host);}
+//#define __debug
 extern void show_mat(const Matrix *mat){
 	for ( int i = 0; i < mat->size[0]; i++){
 		for (int j = 0 ; j < mat->size[1]; j++){
@@ -29,8 +31,8 @@ extern void show_mat(const Matrix *mat){
 typedef Matrix* Parameter;
 class NeuralNetwork{
 public:
-	NeuralNetwork(int num_hidden_layer, int *num_hidden_units, int num_input, int num_minibatch,
-		int num_output, int data_len,  float lr, 
+	NeuralNetwork(int num_hidden_layer, int *num_hidden_units, int num_input, int num_output, int num_minibatch,
+		 int data_len,  float lr, 
 		float momentum, 
 		const char *train_name, const char *label_name): _num_hidden_layer(num_hidden_layer),
 		_num_hidden_units(num_hidden_units), _num_input(num_input),
@@ -119,37 +121,121 @@ void NeuralNetwork::feed_forword(){
 		dot(&_data_stream[i], &_weight[i], &_data_stream[i+1], 0, 1);
 		add_row_vec(&_data_stream[i+1], &_bias[i], &_data_stream[i+1]);
 		apply_sigmoid(&_data_stream[i+1], &_data_stream[i+1]);
+#ifdef __debug
+		cout<<"this is the layers "<<i<<"th"<<endl;
+		copy_to_host(&_data_stream[i]);
+		show_mat(&_data_stream[i]);
+		copy_to_device(&_data_stream[i]);
+#endif
 	}
-	copy_on_device(_label, _error);
-	add_mult(_error, &_data_stream[num], -1.0);
+	add_elementwise(_label,_error,_error);
+	//copy_on_device(_label, _error);
+#ifdef __debug
+	cout<<"this is the error"<<endl;
+	copy_to_host(_error);
+	show_mat(_error);
+	copy_to_device(_error);
+#endif
+	add_mult(_error, &_data_stream[num-1], -1.0);
+#ifdef __debug
+	cout<<"this is the error"<<endl;
+	copy_to_host(_error);
+	show_mat(_error);
+	copy_to_device(_error);
+#endif
 }
 void NeuralNetwork::backword(){
 	int num = layer_units.size();
+	Matrix *d = new Matrix[num];
 	Matrix *tmp = new Matrix;
-	Matrix *tmp1 = new Matirx;
-	generate_zeros(tmp, _error->size[0], _error->size[1]);
-	init_empty(tmp1, _weight[num-1].size[1], _weight[num-1].size[0]);
-	subself_mult_elementwise(&_data_stream[num-1], tmp);
-#ifdef __debug
-	cout<<"the size[0] is "<<_error.size[num-1]<< " and the size[1] "<<_error[num-1].size[1]<<endl;
-#endif
-	//copy_transpose(&_weight[num-1], tmp1);
-	mult_elementwise(_error, tmp, tmp);
-	mult_by_scalar(tmp, -1.0, tmp);
-	for( int i = layer_units.size()-2; i >= 1; i--){
-		Matrix *tmp2 = new Matrix;
-		tmp2 = transpose(&_weight[i]);
-		Matrix *tmp3 = new Matrix;
-		generate_zeros(tmp3, _data_stream[i].size[0], _data_stream[1].size[1]);
-		dot(tmp, tmp2, tmp3, 0, 1);
-		free_device_memory(tmp2);
-		delete tmp2;
+	Matrix *tmp1 = new Matrix;
+	Matrix *tmp2 = new Matrix;
+	init_zeros(tmp, _num_minibatch, layer_units[num-1]);
+	/* init the auxiliary matrix */
+	
+	for(int i =0; i < num; i++){
+		init_zeros(&d[i], _num_minibatch, layer_units[i]);
 	}
-	//cout<<"this is why"<<endl;
-	free_device_memory(tmp1);
+	copy_on_device(_error, tmp);
+	sub_mult(&_data_stream[num-1], tmp);
+#ifdef __debug
+	cout<<"back &_data_stream[num-1] "<<endl;
+	copy_to_host(&_data_stream[num-1]);
+	show_mat(&_data_stream[num-1]);
+	copy_to_device(&_data_stream[num-1]);
+#endif
+	add_elementwise(tmp, &d[num-1], &d[num-1]);
+	for(int i = num -2; i >= 0; i--){
+		init_zeros(tmp1, _weight[i].size[1], _weight[i].size[0]);
+		copy_transpose(&_weight[i], tmp1);
+#ifdef __debug
+		cout<<"back situation"<<endl;
+		copy_to_host(tmp1);
+		show_mat(tmp1);
+		copy_to_device(tmp1);
+#endif
+
+		if(dot(&d[i+1], tmp1, &d[i], 0, 1) == ERROR_INCOMPATIBLE_DIMENSIONS){
+			cout<<"wrong"<<endl;
+		}
+		sub_mult(&_data_stream[i], &d[i]);
+		//mult_elementwise(&d[i], tmp, &d[i]);
+		free_device_memory(tmp1);
+		free(tmp1->data_host);
+	}
+#ifdef __debug
+	for(int i =1 ;i < num-1; i++){
+		cout<<"the weight matrix is :"<< _weight[i].size[0]<<"   "<<_weight[i].size[1]<<endl;
+	}
+#endif
+	/************************************************************************/
+	/* mult a[i]' with d[i+1]                                               */
+	/************************************************************************/
+
+	for (int i =0;i <num-2; i++)
+	{
+		free_device_memory(tmp);
+		free(tmp->data_host);
+
+		Matrix *dw = new Matrix;
+		init_zeros(dw, _weight[i].size[0], _weight[i].size[1]);
+		init_zeros(tmp, _data_stream[i].size[1], _data_stream[i].size[0]);
+		copy_transpose(&_data_stream[i], tmp);
+		if(dot(tmp, &d[i+1], dw, 0, 1) == ERROR_INCOMPATIBLE_DIMENSIONS) {
+			cout<<"wrong dimension"<<endl;
+		}
+		divide_by_scalar(dw, dw->size[1], dw);
+		mult_by_scalar(&_weight_v[i], _momentum, &_weight_v[i]);
+		mult_by_scalar(dw, _learning_rate, dw);
+		add_elementwise(&_weight_v[i], dw, &_weight_v[i]);
+		/*
+		 * update the parameter here!! in order to reduce the code
+		 **/
+
+		free_device_memory(dw);
+		free(dw->data_host);
+		delete dw;
+	}
+	
+	/* free the cuda memory*/
+	//cout<<"begin"<<endl;
+	for(int i = 0; i< num; i++){
+#ifdef __debug
+		cout<<"this is the d["<<i<<"]"<<endl;
+		copy_to_host(&d[i]);
+		show_mat(&d[i]);
+#endif
+		
+		//cout<<d[i].size[0]<<" and "<<d[i].size[1]<<endl;
+		free_device_memory(&d[i]);
+		free(d[i].data_host);
+	}
+	//cout<<"end"<<endl;
 	free_device_memory(tmp);
-	free(tmp);
-	free(tmp1);
+	free(tmp->data_host);
+	delete tmp;
+	delete tmp1;
+	delete d;
 }
 void NeuralNetwork::train(){
 
@@ -167,13 +253,15 @@ void NeuralNetwork::train(){
 	ifs_l.close();
 	ifs.close();
 	cout<<"training the network ..............."<<endl;
-	for(int i = 0; i< 10; i++){
+	for(int i = 0; i< 100; i++){
 		cout<<"epoch: #"<<i<<endl;
-		for (int j = 0; j < _num_epoch; j++){
+		cout<<"_num_output is :"<<_num_output<<endl;
+		cout<<_data_len/_num_minibatch<<endl;
+		for (int j = 0; j < _data_len/_num_minibatch; j++){
 			set_batch_data(j);
  			feed_forword();
  			backword();
-// 			update_parameter();
+ 			update_parameter();
 		}
 	}
 	cout<<"training over"<<endl;
@@ -220,6 +308,10 @@ void NeuralNetwork::read_data(float *data, int batch, int len, ifstream& ifs){
 	for(int i = 0 ; i < batch; i++){
 		for(int j = 0; j<len; j++){
 			ifs >> tmp_data;
+#ifdef __debug
+			cout<<"this is in the read data"<<endl;
+			cout<<tmp_data<<endl;
+#endif
 			data[IDX(i, j, batch)] = tmp_data;
 		}
 	}
@@ -277,4 +369,11 @@ Matrix* NeuralNetwork::transpose(Matrix* src){
 	generate_zeros(tmp, src->size[1], src->size[0]);
 	copy_transpose(src, tmp);
 	return tmp;
+}
+
+void NeuralNetwork::update_parameter(){
+	for(int i =0; i< layer_units.size()-1;i++ ){
+		add_elementwise(&_weight[i],&_weight_v[i],&_weight[i]);
+		add_elementwise(&_bias[i],&_bias_v[i],&_bias[i]);
+	}
 }

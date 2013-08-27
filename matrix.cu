@@ -1,4 +1,6 @@
 #include "matrix.h"
+#include <assert.h>
+#include "learn_kernels.cuh"
 /* ------------------------------ CUBLAS init/shutdown ------------------------------ */
 
 inline bool check_cublas_error() {
@@ -158,7 +160,7 @@ inline char get_transpose_char(Matrix* mat) {
  extern int copy_transpose(Matrix* source, Matrix* target) {
     unsigned int height = source->size[0];
     unsigned int width = source->size[1];
-
+    assert(source->size[0] == target->size[1] && source->size[1] == target->size[0]);
     if (source->size[0] != target->size[1] || source->size[1] != target->size[0])
         return ERROR_INCOMPATIBLE_DIMENSIONS;
 
@@ -702,6 +704,9 @@ inline char get_transpose_char(Matrix* mat) {
     if (!mat1->on_device || !mat2->on_device || !target->on_device)
         return ERROR_NOT_ON_DEVICE;
 
+    assert(get_leading_dimension(mat1) == get_leading_dimension(target) &&
+        get_nonleading_dimension(mat2) == get_nonleading_dimension(target) &&
+        get_nonleading_dimension(mat1) == get_leading_dimension(mat2));
     if (get_leading_dimension(mat1) != get_leading_dimension(target) ||
         get_nonleading_dimension(mat2) != get_nonleading_dimension(target) ||
         get_nonleading_dimension(mat1) != get_leading_dimension(mat2)) {
@@ -919,7 +924,19 @@ inline char get_transpose_char(Matrix* mat) {
 
     return 0;
 }
+extern int sub_mult(Matrix *mat, Matirx *target){
+    int len = mat->size[0]*mat->size[1];
 
+    if (!mat->on_device || !target->on_device)
+        return ERROR_NOT_ON_DEVICE;
+
+    kMultiplyBySigmoidGrad<<<NUM_VECTOR_OP_BLOCKS, NUM_VECTOR_OP_THREADS_PER_BLOCK>>>(mat->data_device, target->data_device, len);
+    cudaThreadSynchronize();
+    if (checkCUDAError())
+        return CUDA_ERROR;
+
+    return 0;
+}
  extern int add_scalar(Matrix* mat, float alpha, Matrix* target) {
     int len = mat->size[0]*mat->size[1];
 
@@ -961,6 +978,13 @@ extern void init_zeros(Matrix *mat, int row, int col){
 	init_from_array(mat, data, row, col);
 	copy_to_device(mat);
 }
+extern void init_ones(Matrix *mat, int row, int col){
+	int len = row*col;
+	float *data = (float *) malloc(sizeof(float)*len);
+	memset(data, 1, sizeof(float)*len);
+	init_from_array(mat, data, row, col);
+	copy_to_device(mat);
+}
 extern void subself_mult_elementwise(Matrix* mat1, Matrix* target){
 	if(mat1->size[0] != target->size[0] || mat1->size[1] != target->size[1])
 		return ;
@@ -970,3 +994,23 @@ extern void subself_mult_elementwise(Matrix* mat1, Matrix* target){
 	add_scalar(tmp, 1.0, tmp);
 	mult_elementwise(mat1, tmp, target);
 }
+extern int col_sum(Matrix *mat, Matrix *target){
+	if(mat == NULL || target == NULL)
+		return -1;
+	Matrix *tmp = new Matrix;
+	tmp->size[0] = mat->size[1];
+	tmp->size[1] = 1;
+	init_ones(tmp, tmp->size[0], tmp->size[1]);
+	int error_code = dot(mat, tmp, target, 1.0f, 0.0f);
+	free_device_memory(tmp);
+	delete tmp->data_host;
+	delete tmp;
+	return error_code;
+}
+
+//extern int row_sum(Matrix *mat. Matrix* target){
+//	assert(mat->size[0] == target->size[0] && target->size[1] == 1);
+//	if(mat->szie[0] != target->size[0] || target->size[1] != 1){
+//		return 	ERROR_INCOMPATIBLE_DIMENSIONS;
+//	}
+//}

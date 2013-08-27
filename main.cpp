@@ -1,4 +1,6 @@
 #include "network.h"
+#define __debug
+#if 0
 template<typename _T>
 void test_vector(vector<_T>& vc, vector<_T>& vc1){
 	int i = 10;
@@ -72,14 +74,62 @@ void test(){
 	delete tmp3;
 	delete tmp4;
 }
-int main()
+#endif 
+
+
+int main(int argc, char **argv)
 {
-	int a[] = {500, 512, 50, 50, 50, 50};
-	int layer = 784;
-	NeuralNetwork *network = new NeuralNetwork(5,a, layer,100, 10, 100, 0.1, 0.9, "test_x.txt", "test_x.txt");
-	Parameter weight =  network->get_weight_parameter();
-	network->train();
-	delete network;
-	test();
+	if(argc!=12){
+		cout<<"usage:"<<endl;
+		cout<<"main train_x train_y hidden_layer hidden_units num_input num_output mini_batch data_len  learning_rate momentum parameter_file"<<endl;
+		cout<<"train_x is the file include the train data"<<endl;
+		cout<<"train_y is the label of the train data"<<endl;
+		cout<<"hidden_layer is the number of hidden layer"<<endl;
+		cout<<"hidden_units is the number of units in hidden layers"<<endl;
+		cout<<"mini_batch is the mini_batch ^_^"<<endl;
+		cout<<"data_len is the totle len of the data"<<endl;
+		cout<<"parameter_file is the file which parameter will be saved"<<endl;
+		cout<<"learning_rate the the learning rate of the neural network, default is 0.1"<<endl;
+		cout<<"momentum is the momentum of the neural network, default is 0.75"<<endl;
+
+	}
+	else{
+#ifdef _WIN32
+		int num_layers = atoi(argv[3]);
+		int hidden_units = atoi(argv[4]);
+		int *a = new int[num_layers];
+		for(int i =0;i<num_layers;i++)
+			a[i]=hidden_units;
+		int num_input  = atoi(argv[5]);
+		int num_output = atoi(argv[6]);
+		int mini_batch = atoi(argv[7]);
+		int data_len = atoi(argv[8]);
+		float learning_rate = atof(argv[9]);
+		float momentum = atof(argv[10]);
+		NeuralNetwork *network = new NeuralNetwork(num_layers,a, num_input,num_output, mini_batch, data_len, learning_rate, momentum, argv[1], argv[2]);
+		Parameter weight =  network->get_weight_parameter();
+		network->train();
+		delete network;
+#endif
+#ifdef __GNUC__
+		int num_layers = atoi(argv[3]);
+		int hidden_units = atoi(argv[4]);
+		int *a = new int[num_layers];
+		for(int i =0;i<num_layers;i++)
+			a[i]=hidden_units;
+		int num_input  = atoi(argv[5]);
+		int num_output = atoi(argv[6]);
+		int mini_batch = atoi(argv[7]);
+		int data_len = atoi(argv[8]);
+		float learning_rate = atof(argv[9]);
+		float momentum = atof(argv[10]);
+		NeuralNetwork *network = new NeuralNetwork(num_layers,a, num_input,num_output, mini_batch, data_len, learning_rate, momentum, argv[1], argv[2]);
+		Parameter weight =  network->get_weight_parameter();
+		network->train();
+		delete network;
+#endif
+
+	}
+
 	return 0;
 }

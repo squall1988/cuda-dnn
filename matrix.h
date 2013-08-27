@@ -55,3 +55,6 @@ extern int init_empty(Matrix* mat, int m, int n);
 extern int copy_transpose(Matrix* source, Matrix* target);
 extern void init_zeros(Matrix *mat, int row, int col);
 extern int mult_by_scalar(Matrix *mat, float alpha, Matrix* target);
+extern int sub_mult(Matrix *mat, Matrix *target);
+extern int add_elementwise(Matrix* mat1, Matrix* mat2, Matrix* target) ;
+extern int divide_by_scalar(Matrix* mat, float alpha, Matrix* target);
